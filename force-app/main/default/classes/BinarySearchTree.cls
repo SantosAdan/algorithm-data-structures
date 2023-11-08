@@ -81,7 +81,7 @@ public class BinarySearchTree {
         return node;
     }
     
-    private class Node {
+    public class Node {
         public Integer value;
         public Node left;
         public Node right;
