@@ -1,0 +1,143 @@
+name: Create Scratch Org and Run Apex Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches: [main]
+    paths:
+      - 'force-app/**'
+
+env:
+    BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+    COMMIT_ID: ${{ github.event.pull_request.html_url || github.event.head_commit.url }}
+    SCRATCH_ORG_NAME: org
+    DEV_HUB_USERNAME: adan@spacedice.com
+    APP_NAME: Algorithms
+
+jobs:
+  validate-feature-branch:
+    runs-on: ubuntu-latest
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install sfdx
+        run: |
+            mkdir sfdx
+            wget -qO- https://developer.salesforce.com/media/salesforce-cli/sfdx/channels/stable/sfdx-linux-x64.tar.xz | tar xJ -C sfdx --strip-components 1
+            export PATH="$(pwd)/sfdx/bin"
+            echo "$(pwd)/sfdx/bin" >> $GITHUB_PATH
+
+      - name: Create scratch org and deploy code
+        run: |
+            mkdir ./build
+            echo "${{secrets.SERVER_KEY}}" > ./build/server.key
+            sf org login jwt --client-id ${{secrets.DEV_HUB_CONSUMER_KEY}} --jwt-key-file ./build/server.key --username ${{env.DEV_HUB_USERNAME}} --alias devhub --instance-url https://spacedice.my.salesforce.com --set-default-dev-hub
+            sf org create scratch --definition-file config/project-scratch-def.json --set-default --duration-days 15 --alias ${{env.SCRATCH_ORG_NAME}}
+            sf org generate password --target-org ${{env.SCRATCH_ORG_NAME}}
+            sf project deploy start --target-org ${{env.SCRATCH_ORG_NAME}} --ignore-conflicts --wait 30
+
+      - name: Get scratch org login URL
+        id: get_login_url
+        run: |
+            cmd="sf org open --target-org ${{env.SCRATCH_ORG_NAME}} --url-only --json" && (echo $cmd >&2)
+            output=$($cmd) # don't echo/expose the output which contains the auth url
+            url=$(jq -r ".result.url" <<< $output)
+            echo "url=$url" >> $GITHUB_OUTPUT
+
+            cmd2="sf org display user --target-org ${{env.SCRATCH_ORG_NAME}} --json" && (echo $cmd >&2)
+            output2=$($cmd2) # don't echo/expose the output which contains the auth url
+            loginUrl=$(jq -r ".result.instanceUrl" <<< $output2)
+            username=$(jq -r ".result.username" <<< $output2)
+            password=$(jq -r ".result.password" <<< $output2)
+
+            echo "url=$url" >> $GITHUB_OUTPUT
+            echo "loginUrl=$loginUrl" >> $GITHUB_OUTPUT
+            echo "username=$username" >> $GITHUB_OUTPUT
+            echo "password=$password" >> $GITHUB_OUTPUT
+      
+      - name: Add Scratch Org Login Url to PR
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Scratch Org created\n>Instance URL ${{ steps.get_login_url.outputs.loginUrl }}\n>Username ${{ steps.get_login_url.outputs.username }}\n>Password ${{ steps.get_login_url.outputs.password }}\n\n[Click to login](${{ steps.get_login_url.outputs.url }})`
+            })
+
+      - name: Run Apex Tests
+        id: apex-tests
+        run: |
+          sf apex run test --test-level RunLocalTests --output-dir ./apex-test-results --code-coverage --target-org ${{env.SCRATCH_ORG_NAME}} --wait 60
+      
+      - name: Report Apex Tests Results
+        uses: mikepenz/action-junit-report@v4
+        if: success() || failure() # always run even if the previous step fails
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          report_paths: '**/apex-test-results/test-result-*.xml'
+          check_name: Apex Tests
+          detailed_summary: true
+          fail_on_failure: true
+
+      - name: Post org credentials to Slack Channel
+        id: slack
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "GitHub Action build result: ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{env.APP_NAME}} Scratch Org Login Info"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":arrow_upper_right: Branch pushed: ${{env.BRANCH_NAME}}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":arrows_clockwise: Pull Request: ${{env.COMMIT_ID}}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":rotating_light: Build status: ${{job.status}}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ">Instance URL: ${{ steps.get_login_url.outputs.loginUrl }}\n>Username: ${{ steps.get_login_url.outputs.username }}\n>Password: ${{ steps.get_login_url.outputs.password }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "<${{ steps.get_login_url.outputs.url }}|Click to login>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
