@@ -4,6 +4,7 @@
  * @since 2023-11-08
  */
 public class BinarySearchTree {
+    @TestVisible
     private Node root;
 
     /**
@@ -15,18 +16,18 @@ public class BinarySearchTree {
 
     /**
      * @description Constructor with initial value
-     * @param key `Integer` value to be added to the tree
+     * @param value `Integer` value to be added to the tree
      */
-    public BinarySearchTree(Integer key) {
-        this.root = new Node(key);
+    public BinarySearchTree(Integer value) {
+        this.root = new Node(value);
     }
 
     /**
      * @description Adds a new node to the tree
-     * @param key `Integer` value to be added to the tree
+     * @param value `Integer` value to be added to the tree
      */
-    public void add(Integer key) {
-        this.root = add(this.root, key);
+    public void add(Integer value) {
+        this.root = add(this.root, value);
     }
 
     /**
@@ -49,11 +50,11 @@ public class BinarySearchTree {
             return false;
         }
 
-        if (searchTerm == node.key) {
+        if (searchTerm == node.value) {
             return true;
         }
 
-        if (searchTerm < node.key) {
+        if (searchTerm < node.value) {
             return search(node.left, searchTerm);
         }
 
@@ -63,30 +64,30 @@ public class BinarySearchTree {
     /**
      * @description Adds a new node to the tree
      * @param node `Node` previous node
-     * @param key `Integer` value to be added to the tree
+     * @param value `Integer` value to be added to the tree
      * @return  `Node` new node
      */
-    private Node add(Node node, Integer key) {
+    private Node add(Node node, Integer value) {
         if (node == null) {
-            return new Node(key);
+            return new Node(value);
         }
 
-        if (key <= node.key) {
-            node.left = add(node.left, key);
+        if (value <= node.value) {
+            node.left = add(node.left, value);
         } else {
-            node.right = add(node.right, key);
+            node.right = add(node.right, value);
         }
 
         return node;
     }
     
     private class Node {
-        Integer key;
+        Integer value;
         Node left;
         Node right;
 
-        public Node(Integer key) {
-            this.key = key;
+        public Node(Integer value) {
+            this.value = value;
             this.left = null;
             this.right = null;
         }
